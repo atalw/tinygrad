@@ -8,6 +8,9 @@ from tinygrad.runtime.ops_llvm import LLVMDevice, LLVMProgram, LLVMCompiler
 from llvmlite import ir  # type: ignore
 from tinygrad.helpers import flat_mv
 from tinygrad.device import MallocAllocator
+from tinygrad.renderer.llvmir import const
+from tinygrad.dtype import dtypes
+
 
 # https://github.com/corsix/amx/blob/main/Instructions.md
 # 12 lines for AMX support
@@ -25,7 +28,7 @@ class AMX:
   mac16, fma16, fms16 = partialmethod(op_gpr, 14), partialmethod(op_gpr, 15), partialmethod(op_gpr, 16)
   vecint, vecfp, matint, matfp, genlut = partialmethod(op_gpr, 18), partialmethod(op_gpr, 19), partialmethod(op_gpr, 20), partialmethod(op_gpr, 21), partialmethod(op_gpr, 22)
 
-def int_const(x): return ir.Constant(ir.IntType(64), x)
+# def const(x): return ir.Constant(ir.IntType(64), x)
 
 
 N = 4096
@@ -63,36 +66,36 @@ loop_1_exit = ir.IRBuilder(func.append_basic_block(name="loop_y_exit"))
 exit = ir.IRBuilder(func.append_basic_block(name="exit"))
 
 y = loop_1.phi(ir.IntType(64), name="y")
-y.add_incoming(int_const(0), entry._block)
-yp = loop_1_exit.add(y, int_const(32*2))
+y.add_incoming(const(0, dtypes.int64), entry._block)
+yp = loop_1_exit.add(y, const(32*2, dtypes.int64))
 y.add_incoming(yp, loop_1_exit._block)
 
 prefetch_function = ir.Function(module, ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.FloatType()), ir.IntType(32), ir.IntType(32), ir.IntType(32)]), name="llvm.prefetch")
 
 xptr = y
-addr = loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))
+addr = loop_1_exit.add(xm, loop_1_exit.mul(const(4, dtypes.int64), xptr))
 
-#prefetch_ptr = loop_1_exit.inttoptr(loop_1_exit.add(addr, int_const(128)), ir.PointerType(ir.FloatType()))
+#prefetch_ptr = loop_1_exit.inttoptr(loop_1_exit.add(addr, const(128, dtypes.int64)), ir.PointerType(ir.FloatType()))
 #loop_1_exit.call(prefetch_function, [prefetch_ptr, ir.IntType(32)(0), ir.IntType(32)(2), ir.IntType(32)(1)])
 
-AMX.ldx(loop_1_exit, loop_1_exit.add(int_const(1<<62), addr))
-xptr = loop_1_exit.add(xptr, int_const(32))
-AMX.ldy(loop_1_exit, loop_1_exit.add(int_const(1<<62), loop_1_exit.add(xm, loop_1_exit.mul(int_const(4), xptr))))
+AMX.ldx(loop_1_exit, loop_1_exit.add(const(1<<62, dtypes.int64), addr))
+xptr = loop_1_exit.add(xptr, const(32, dtypes.int64))
+AMX.ldy(loop_1_exit, loop_1_exit.add(const(1<<62, dtypes.int64), loop_1_exit.add(xm, loop_1_exit.mul(const(4, dtypes.int64), xptr))))
 
-AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28))
-AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 28 | 1 << 20 | (16*4)<<10))
-AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 29))
-AMX.fma32(loop_1_exit, int_const(1 << 63 | 1 << 29 | 1 << 20 | (16*4)))
+AMX.fma32(loop_1_exit, const(1 << 63 | 1 << 28, dtypes.int64))
+AMX.fma32(loop_1_exit, const(1 << 63 | 1 << 28 | 1 << 20 | (16*4)<<10, dtypes.int64))
+AMX.fma32(loop_1_exit, const(1 << 63 | 1 << 29, dtypes.int64))
+AMX.fma32(loop_1_exit, const(1 << 63 | 1 << 29 | 1 << 20 | (16*4), dtypes.int64))
 
 AMX.set(entry)
 
-AMX.stz(exit, exit.add(zm, int_const(1 << 62 | (0 << 56) | 0)))
+AMX.stz(exit, exit.add(zm, const(1 << 62 | (0 << 56) | 0, dtypes.int64)))
 AMX.clr(exit)
 
 entry.branch(loop_1._block)
 loop_1.branch(loop_1_exit._block)
-loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, int_const(N*N)), exit._block, loop_1._block)
-exit.ret(int_const(0))
+loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, const(N*N, dtypes.int64)), exit._block, loop_1._block)
+exit.ret(const(0, dtypes.int64))
 
 device = LLVMDevice("llvm")
 prog = LLVMProgram(device, "exec", LLVMCompiler(device).compile(str(module)))
@@ -114,40 +117,40 @@ exit = ir.IRBuilder(func.append_basic_block(name="exit"))
 AMX.set(loop_2)
 
 # stride
-xptr = loop_3_exit.add(x, loop_3_exit.mul(k, int_const(N)))
-yptr = loop_3_exit.add(y, loop_3_exit.mul(k, int_const(N)))
+xptr = loop_3_exit.add(x, loop_3_exit.mul(k, const(N, dtypes.int64)))
+yptr = loop_3_exit.add(y, loop_3_exit.mul(k, const(N, dtypes.int64)))
 
 # if you are okay with the wrong answer, this is faster
-#xptr = loop_3_exit.add(x, loop_3_exit.mul(k, int_const(32)))
-#yptr = loop_3_exit.add(y, loop_3_exit.mul(k, int_const(32)))
+#xptr = loop_3_exit.add(x, loop_3_exit.mul(k, const(32, dtypes.int64)))
+#yptr = loop_3_exit.add(y, loop_3_exit.mul(k, const(32, dtypes.int64)))
 
 # double loads load 32 floats
-AMX.ldx(loop_3_exit, loop_3_exit.add(int_const(1<<62), loop_3_exit.add(xm, loop_3_exit.mul(int_const(4), xptr))))
-AMX.ldy(loop_3_exit, loop_3_exit.add(int_const(1<<62), loop_3_exit.add(ym, loop_3_exit.mul(int_const(4), yptr))))
+AMX.ldx(loop_3_exit, loop_3_exit.add(const(1<<62, dtypes.int64), loop_3_exit.add(xm, loop_3_exit.mul(const(4, dtypes.int64), xptr))))
+AMX.ldy(loop_3_exit, loop_3_exit.add(const(1<<62, dtypes.int64), loop_3_exit.add(ym, loop_3_exit.mul(const(4, dtypes.int64), yptr))))
 
 # <Z row> <X offset> <Y offset>
-AMX.fma32(loop_3_exit, int_const(0<<20 | (0*16*4)<<10 | (0*16*4)))
-AMX.fma32(loop_3_exit, int_const(1<<20 | (1*16*4)<<10 | (0*16*4)))
-AMX.fma32(loop_3_exit, int_const(2<<20 | (0*16*4)<<10 | (1*16*4)))
-AMX.fma32(loop_3_exit, int_const(3<<20 | (1*16*4)<<10 | (1*16*4)))
+AMX.fma32(loop_3_exit, const(0<<20 | (0*16*4)<<10 | (0*16*4), dtypes.int64))
+AMX.fma32(loop_3_exit, const(1<<20 | (1*16*4)<<10 | (0*16*4), dtypes.int64))
+AMX.fma32(loop_3_exit, const(2<<20 | (0*16*4)<<10 | (1*16*4), dtypes.int64))
+AMX.fma32(loop_3_exit, const(3<<20 | (1*16*4)<<10 | (1*16*4), dtypes.int64))
 
 # store
-gptr = loop_2_exit.mul(loop_2_exit.add(loop_2.mul(y, int_const(N)), x), int_const(4))
+gptr = loop_2_exit.mul(loop_2_exit.add(loop_2.mul(y, const(N, dtypes.int64)), x), const(4, dtypes.int64))
 zmp = loop_2_exit.add(zm, gptr)
 for j in range(2):
   for r in range(16):
     z_row = j*2
     ptr = ((j*16)+r)*N
-    AMX.stz(loop_2_exit, loop_2_exit.add(zmp, int_const(1 << 62 | ((r*4+z_row) << 56) | ptr*4)))
+    AMX.stz(loop_2_exit, loop_2_exit.add(zmp, const(1 << 62 | ((r*4+z_row) << 56) | ptr*4, dtypes.int64)))
 AMX.clr(loop_2_exit)
 
-yp = loop_1_exit.add(y, int_const(32))
-xp = loop_2_exit.add(x, int_const(32))
-kp = loop_3_exit.add(k, int_const(1))
+yp = loop_1_exit.add(y, const(32, dtypes.int64))
+xp = loop_2_exit.add(x, const(32, dtypes.int64))
+kp = loop_3_exit.add(k, const(1, dtypes.int64))
 
-y.add_incoming(int_const(0), entry._block)
-x.add_incoming(int_const(0), loop_1._block)
-k.add_incoming(int_const(0), loop_2._block)
+y.add_incoming(const(0, dtypes.int64), entry._block)
+x.add_incoming(const(0, dtypes.int64), loop_1._block)
+k.add_incoming(const(0, dtypes.int64), loop_2._block)
 y.add_incoming(yp, loop_1_exit._block)
 x.add_incoming(xp, loop_2_exit._block)
 k.add_incoming(kp, loop_3_exit._block)
@@ -156,10 +159,10 @@ entry.branch(loop_1._block)
 loop_1.branch(loop_2._block)
 loop_2.branch(loop_3._block)
 loop_3.branch(loop_3_exit._block)
-loop_3_exit.cbranch(loop_3_exit.icmp_unsigned("==", kp, int_const(N)), loop_2_exit._block, loop_3._block)
-loop_2_exit.cbranch(loop_2_exit.icmp_unsigned("==", xp, int_const(N)), loop_1_exit._block, loop_2._block)
-loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, int_const(N)), exit._block, loop_1._block)
-exit.ret(int_const(0))
+loop_3_exit.cbranch(loop_3_exit.icmp_unsigned("==", kp, const(N, dtypes.int64)), loop_2_exit._block, loop_3._block)
+loop_2_exit.cbranch(loop_2_exit.icmp_unsigned("==", xp, const(N, dtypes.int64)), loop_1_exit._block, loop_2._block)
+loop_1_exit.cbranch(loop_1_exit.icmp_unsigned("==", yp, const(N, dtypes.int64)), exit._block, loop_1._block)
+exit.ret(const(0, dtypes.int64))
 
 device = LLVMDevice("llvm")
 prog = LLVMProgram(device, "exec", LLVMCompiler(device).compile(str(module)))
