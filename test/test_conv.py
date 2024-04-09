@@ -138,5 +138,24 @@ class TestConv(unittest.TestCase):
     x = x.reshape((1, 12, 128, 256))
     x.numpy()
 
+  def test_backward_single_reduce(self):
+    from tinygrad import nn
+    class Model:
+      def __init__(self):
+        self.layers = [
+          nn.Conv2d(3, 3, 3, padding=1, bias=False),
+          nn.Conv2d(3, 3, 3, padding=1, bias=False),
+          ]
+      def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
+
+    model = Model()
+    x = Tensor.rand(1, 3, 32, 32)
+    opt = nn.optim.SGD(nn.state.get_parameters(model), momentum=0)
+    out = model(x)
+    l = out.binary_crossentropy(Tensor([1]))
+    l.backward()
+    opt.step()
+    l.realize()
+
 if __name__ == '__main__':
   unittest.main()
